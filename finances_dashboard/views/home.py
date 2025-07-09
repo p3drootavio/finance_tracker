@@ -1,4 +1,4 @@
-"""Home page view with high level UI and data loading logic."""
+"""Home page view with high-level UI and data loading logic."""
 
 # Import standard libraries
 import json
@@ -40,16 +40,15 @@ class CategoryManager:
             try:
                 with open(self.file_path, "r", encoding="utf-8") as f:
                     self.categories = json.load(f)
-            except json.JSONDecodeError:
-                # Corrupted category file would break the UI; fall back to
-                # default and surface an error message instead of raising.
+            except json.JSONDecodeError: # Corrupted category file would break the UI
                 st.error("Failed to load saved categories. Using defaults.")
                 self.categories = {"Uncategorized": []}
 
         st.session_state["categories"] = self.categories
 
+
     def save(self) -> None:
-        """Persist categories to disk and keep session state in sync."""
+        """Persist categories to disk and keep session-state in sync."""
         with open(self.file_path, "w", encoding="utf-8") as f:
             json.dump(self.categories, f)
         st.session_state["categories"] = self.categories
@@ -64,6 +63,7 @@ class CategoryManager:
         self.categories[name] = []
         self.save()
         return True
+
 
     def add_keyword(self, category: str, keyword: str) -> bool:
         keyword = keyword.strip()
@@ -97,7 +97,7 @@ class CategoryManager:
                 continue
 
             # Combine keywords into a single regular expression. ``re.escape``
-            # avoids unintended regex behaviour if keywords contain symbols.
+            # avoids unintended regex behavior if keywords contain symbols.
             pattern = "|".join(re.escape(k) for k in keywords)
             mask = df["Description"].str.lower().str.contains(pattern)
             df.loc[mask, "Category"] = category
@@ -106,10 +106,11 @@ class CategoryManager:
 
 
 class TransactionDataLoader:
-    """Load and preprocess CSV data before it is visualised."""
+    """Load and preprocess CSV data before it is visualized."""
 
-    def __init__(self, categoriser: CategoryManager) -> None:
-        self.categoriser = categoriser
+    def __init__(self, categorizer: CategoryManager) -> None:
+        self.categorizer = categorizer
+
 
     def load(self, file) -> pd.DataFrame | None:
         """Parse a CSV upload into a DataFrame.
@@ -117,19 +118,31 @@ class TransactionDataLoader:
         Errors are surfaced to the user instead of being raised so that the
         UI remains usable even with malformed input files.
         """
+        expected_cols = [
+            "Details",  # DEBIT / CREDIT
+            "Posting Date",  # MM/DD/YYYY
+            "Description",
+            "Amount",
+            "Type",
+            "Balance",
+            "Check or Slip #"
+        ]
+        raw_cols = expected_cols + ["_extra"]
 
         try:
-            df = pd.read_csv(file, quotechar='"', skipinitialspace=True)
-            df.columns = [col.strip() for col in df.columns]
-            df["Amount"] = pd.to_numeric(
-                df["Amount"].astype(str).str.replace(",", "").str.replace("$", ""),
-                errors="coerce",
+            df = pd.read_csv(
+                file,
+                dtype=str,
+                names=raw_cols,
+                header=0,
+                usecols=raw_cols[:-1],
+                skipinitialspace=True
             )
-            df["Details"] = pd.to_datetime(df["Details"], format="%m/%d/%Y", errors="coerce")
+            df.columns = [c.strip() for c in df.columns]
 
-            # Delegate categorisation to ``CategoryManager`` for SRP compliance
-            return self.categoriser.categorize_transactions(df)
-        except Exception as exc:  # noqa: BLE001 -- surface any parsing issues
+            return self.categorizer.categorize_transactions(df)
+
+        except Exception as exc:
             st.error(f"Error loading data: {exc}")
             return None
 
@@ -138,8 +151,8 @@ class HomePage:
     """Render logic for the application's home screen."""
 
     def __init__(self) -> None:
-        self.categoriser = CategoryManager()
-        self.loader = TransactionDataLoader(self.categoriser)
+        self.categorizer = CategoryManager()
+        self.loader = TransactionDataLoader(self.categorizer)
 
     # ------------------------------------------------------------------
     # Public API
@@ -150,7 +163,7 @@ class HomePage:
         st.header(f"{HEADER_ICON} Home")
         st.subheader("Welcome to the Finances Dashboard!")
 
-        self.categoriser.load()
+        self.categorizer.load()
         self._show_file_uploader()
         self._render_weekly_summary()
         self._render_recent_transactions()
@@ -193,6 +206,7 @@ class HomePage:
             else:
                 st.error("🔴 Bad")
 
+
     def _render_recent_transactions(self) -> None:
         """Mock recent transactions table and balance summary."""
 
@@ -216,6 +230,7 @@ class HomePage:
             st.metric("Investments", "$12,000")
             st.metric("Total Assets", "$18,500")
 
+
     def _show_file_uploader(self) -> None:
         """Handle CSV upload and category management UI."""
 
@@ -236,10 +251,10 @@ class HomePage:
         with tab1:
             new_category = st.text_input("New Category", key="new_category")
             if st.button("Add Category"):
-                if self.categoriser.add_category(new_category):
+                if self.categorizer.add_category(new_category):
                     st.rerun()
 
-            for category in self.categoriser.categories:
+            for category in self.categorizer.categories:
                 if category == "Uncategorized":
                     continue
                 st.subheader(category)

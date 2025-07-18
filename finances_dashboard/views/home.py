@@ -165,8 +165,8 @@ class HomePage:
 
         self.categorizer.load()
         self._show_file_uploader()
-        self._render_weekly_summary()
-        self._render_recent_transactions()
+        # self._render_weekly_summary()
+        # self._render_recent_transactions()
 
     # ------------------------------------------------------------------
     # UI components
@@ -247,7 +247,7 @@ class HomePage:
         st.session_state.debits_df = data[data["Details"] == "DEBIT"].copy()
         st.session_state.credits_df = data[data["Details"] == "CREDIT"].copy()
 
-        tab1, _ = st.tabs(["Expenses (Debits)", "Payments (Credits)"])
+        tab1, tab2 = st.tabs(["Expenses (Debits)", "Payments (Credits)"])
         with tab1:
             new_category = st.text_input("New Category", key="new_category")
             if st.button("Add Category"):
@@ -257,14 +257,52 @@ class HomePage:
             for category in self.categorizer.categories:
                 if category == "Uncategorized":
                     continue
-                st.subheader(category)
+                # st.subheader(category)
 
             st.subheader("Your Expenses")
-            st.data_editor(
-                st.session_state.debits_df[["Details", "Posting Date", "Description"]]
+            edited_df_db = st.data_editor(
+                st.session_state.debits_df[["Posting Date", "Description", "Amount", "Category"]],
+                column_config={
+                    "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
+                    "Amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
+                    "Category": st.column_config.SelectboxColumn(
+                        "Category",
+                        options=list(st.session_state.categories.keys())),
+                },
+                hide_index=True,
+                use_container_width=True,
+                key="category_editor"
             )
 
-        st.write(data)
+            save_button = st.button("Save Changes", type="primary")
+            if save_button:
+                for idx, row in edited_df_db.iterrows():
+                    new_category = row["Category"]
+                    if new_category == st.session_state.debits_df.at[idx, "Category"]:
+                        continue
+
+                    description = row["Description"]
+                    st.session_state.debits_df.at[idx, "Category"] = new_category
+                    self.categorizer.add_keyword(new_category, description)
+
+        with tab2:
+            '''
+            new_category_cr = st.text_input("New Category", key="new_category_cr")
+            if st.button("Add Category"):
+                if self.categorizer.add_keyword(new_category_cr):
+                    st.rerun()
+            '''
+
+            for category in self.categorizer.categories:
+                if category == "Uncategorized":
+                    continue
+
+            st.subheader("Your Payments")
+            st.data_editor(
+                st.session_state.credits_df[["Posting Date", "Description", "Amount"]]
+            )
+
+        # st.write(data)
 
 
 def render() -> None:

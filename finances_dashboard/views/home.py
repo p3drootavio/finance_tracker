@@ -21,6 +21,7 @@ CATEGORY_COLORS = {
     "Other": "#03A9F4",          # Blue
 }
 CATEGORY_FILE = "categories.json"
+_CLEAN_RE = re.compile(r"[^a-z ]")  # keep only letters + spaces
 
 
 class CategoryManager:
@@ -66,7 +67,7 @@ class CategoryManager:
 
 
     def add_keyword(self, category: str, keyword: str) -> bool:
-        keyword = keyword.strip()
+        keyword = self._clean(keyword).strip()
         if category not in self.categories or not keyword:
             return False
 
@@ -75,6 +76,11 @@ class CategoryManager:
             self.save()
             return True
         return False
+
+
+    def extract_keyword(self, description: str) -> str:
+        words = self._clean(description).split()
+        return " ".join(words[:2])
 
     # ------------------------------------------------------------------
     # Categorisation
@@ -92,6 +98,8 @@ class CategoryManager:
         df = df.copy()
         df["Category"] = "Uncategorized"
 
+        clean_desc = self._clean(df["Description"])
+
         for category, keywords in self.categories.items():
             if category == "Uncategorized" or not keywords:
                 continue
@@ -99,10 +107,17 @@ class CategoryManager:
             # Combine keywords into a single regular expression. ``re.escape``
             # avoids unintended regex behavior if keywords contain symbols.
             pattern = "|".join(re.escape(k) for k in keywords)
-            mask = df["Description"].str.lower().str.contains(pattern)
+            mask = clean_desc.str.contains(pattern)
             df.loc[mask, "Category"] = category
 
         return df
+
+
+    @staticmethod
+    def _clean(text: str | pd.Series) -> str | pd.Series:
+        if isinstance(text, pd.Series):
+            return text.str.lower().str.replace(_CLEAN_RE, "", regex=True)
+        return _CLEAN_RE.sub("", text.lower())
 
 
 class TransactionDataLoader:
@@ -139,6 +154,19 @@ class TransactionDataLoader:
                 skipinitialspace=True
             )
             df.columns = [c.strip() for c in df.columns]
+
+            df["Description"] = (
+                df["Description"]
+                .str.replace(r"\s{2,}.*", "", regex=True)
+                .str.strip()
+            )
+
+            df["Amount"] = (
+                df["Amount"]
+                    .str.replace(r"[,$]", "", regex=True)
+                    .str.replace(r"[()]", "", regex=True)
+                    .astype(float)
+            )
 
             return self.categorizer.categorize_transactions(df)
 
@@ -257,7 +285,6 @@ class HomePage:
             for category in self.categorizer.categories:
                 if category == "Uncategorized":
                     continue
-                # st.subheader(category)
 
             st.subheader("Your Expenses")
             edited_df_db = st.data_editor(
@@ -282,27 +309,53 @@ class HomePage:
                         continue
 
                     description = row["Description"]
+                    keyword = self.categorizer.extract_keyword(description)
+
                     st.session_state.debits_df.at[idx, "Category"] = new_category
-                    self.categorizer.add_keyword(new_category, description)
+                    self.categorizer.add_keyword(new_category, keyword)
+
+                # re‑run auto‑categorization so new keywords tag similar rows right away
+                st.session_state.debits_df = self.categorizer.categorize_transactions(
+                    st.session_state.debits_df
+                )
+                self.categorizer.save()  # ensure JSON is flushed to the disk
+                st.rerun()  # refresh UI with updated categories
+
+            st.subheader("Expense Summary")
+            category_totals = st.session_state.debits_df.groupby("Category")["Amount"].sum().reset_index()
+            category_totals = category_totals.sort_values("Amount", ascending=False)
+
+            st.dataframe(
+                category_totals,
+                column_config={
+                    "Amount": st.column_config.NumberColumn("Amount", format="$%.2f")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
+            category_totals["Spend"] = category_totals["Amount"].abs()
+
+            fig = px.pie(
+                category_totals,
+                values="Spend",
+                names="Category",
+                title="Spending Breakdown",
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
 
         with tab2:
-            '''
-            new_category_cr = st.text_input("New Category", key="new_category_cr")
-            if st.button("Add Category"):
-                if self.categorizer.add_keyword(new_category_cr):
-                    st.rerun()
-            '''
-
             for category in self.categorizer.categories:
                 if category == "Uncategorized":
                     continue
 
             st.subheader("Your Payments")
+            total_payments = st.session_state.credits_df["Amount"].sum()
+            st.metric("Total Payments", f"${total_payments:,.2f}")
             st.data_editor(
                 st.session_state.credits_df[["Posting Date", "Description", "Amount"]]
             )
-
-        # st.write(data)
 
 
 def render() -> None:
